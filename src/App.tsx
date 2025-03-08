@@ -1,14 +1,13 @@
 import { Hooks } from 'porto/wagmi'
-import { type Hex, formatEther, parseEther } from 'viem'
+import { type Hex, parseEther } from 'viem'
 import {
-  type BaseError,
   useAccount,
+  useBalance,
   useConnectors,
-  useReadContract,
 } from 'wagmi'
 import { useCallsStatus, useSendCalls } from 'wagmi/experimental'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   generatePrivateKey,
   privateKeyToAccount,
@@ -42,7 +41,6 @@ export function App() {
       <Account />
       {isConnected ? (
         <>
-          <Balance />
           <GrantPermissions />
           <Mint />
         </>
@@ -209,25 +207,25 @@ function UpgradeAccount() {
   )
 }
 
-function Balance() {
-  const { address } = useAccount()
-  const { data: balance } = useReadContract({
-    ...ExperimentERC20,
-    query: {
-      enabled: !!address,
-      refetchInterval: 2_000,
-    },
-    functionName: 'balanceOf',
-    args: [address!],
-  })
+// function Balance() {
+//   const { address } = useAccount()
+//   const { data: balance } = useReadContract({
+//     ...ExperimentERC20,
+//     query: {
+//       enabled: !!address,
+//       refetchInterval: 2_000,
+//     },
+//     functionName: 'balanceOf',
+//     args: [address!],
+//   })
 
-  return (
-    <div>
-      <h2>Balance</h2>
-      <div>Balance: {formatEther(balance ?? 0n)} EXP</div>
-    </div>
-  )
-}
+//   return (
+//     <div>
+//       <h2>Balance</h2>
+//       <div>Balance: {formatEther(balance ?? 0n)} EXP</div>
+//     </div>
+//   )
+// }
 
 function GrantPermissions() {
   const permissions = Hooks.usePermissions()
@@ -255,45 +253,69 @@ function GrantPermissions() {
 function Mint() {
   const { address } = useAccount()
   const { data: id, error, isPending, sendCalls } = useSendCalls()
-
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useCallsStatus({
     id: id as string,
     query: {
       enabled: !!id,
-      refetchInterval({ state }) {
+      refetchInterval: ({ state }) => {
         if (state.data?.status === 'CONFIRMED') return false
         return 1_000
       },
     },
   })
 
+  const balance = useBalance()
+  const [transactions, setTransactions] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (id) setTransactions((prev) => new Set([...prev, id]))
+  }, [id])
+
   return (
     <div>
-      <h2>Mint EXP</h2>
+      <h3>[client] Mint EXP [balance: {balance.data?.formatted}]</h3>
       <form
-        onSubmit={(e) => {
-          e.preventDefault()
+        onSubmit={(event) => {
+          event.preventDefault()
           sendCalls({
             calls: [
               {
-                abi: ExperimentERC20.abi,
-                to: ExperimentERC20.address,
                 functionName: 'mint',
+                abi: ExperimentERC20.abi,
+                to: ExperimentERC20.address[0],
                 args: [address!, parseEther('100')],
               },
             ],
           })
         }}
       >
-        <button disabled={isPending} type="submit">
+        <button
+          type="submit"
+          disabled={isPending}
+          style={{ marginBottom: '5px' }}
+        >
           {isPending ? 'Confirming...' : 'Mint 100 EXP'}
         </button>
       </form>
-      {id && <div>Transaction Hash: {id}</div>}
-      {isConfirming && 'Waiting for confirmation...'}
-      {isConfirmed && 'Transaction confirmed.'}
+      <ul style={{ listStyleType: 'none', padding: 0 }}>
+        {Array.from(transactions).map((tx) => (
+          <li key={tx}>
+            <a
+              target="_blank"
+              rel="noopener noreferrer"
+              href={`https://odyssey-explorer.ithaca.xyz/tx/${tx}`}
+            >
+              {tx}
+            </a>
+          </li>
+        ))}
+      </ul>
+      <p>{isConfirming && 'Waiting for confirmation...'}</p>
+      <p>{isConfirmed && 'Transaction confirmed.'}</p>
       {error && (
-        <div>Error: {(error as BaseError).shortMessage || error.message}</div>
+        <div>
+          Error: {error.message}
+        </div>
       )}
     </div>
   )
